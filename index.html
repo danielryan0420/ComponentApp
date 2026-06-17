@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Factory Scheduler — Gantt</title>
+<!-- External dependency: SheetJS (xlsx). Loaded from CDN; the app degrades
+     gracefully with an on-screen note if the CDN is blocked. -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  /* Explicit colors only — no reliance on an external theme so the app renders
+     identically in sandboxed / embedded contexts. */
+  :root {
+    --bg: #0b0b16;
+    --surface: #1a1a2e;
+    --surface-2: #20203a;
+    --lane: #0f0f1e;
+    --border: #2c2c4a;
+    --text: #e8e8f2;
+    --muted: #9aa0b4;
+    --gray-dark: #6b7280;   /* WIP active */
+    --gray-light: #9ca3af;  /* WIP missing components */
+    --green: #22c55e;       /* ready / fully covered */
+    --yellow: #eab308;      /* missing non-critical */
+    --red: #ef4444;         /* critical shortage */
+    --blue: #3b82f6;        /* scheduled, covered */
+    --purple: #a855f7;      /* scheduled, deficit */
+    --accent: #38bdf8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header.app {
+    flex: 0 0 auto; background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 8px 14px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .titlebar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .titlebar h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .titlebar .ver { color: var(--muted); font-size: 11px; }
+  .spacer { flex: 1 1 auto; }
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  button, .btn {
+    background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.active { background: var(--accent); color: #08121a; border-color: var(--accent); font-weight: 600; }
+  input[type="search"], select {
+    background: var(--lane); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; font-size: 12px;
+  }
+  label.file {
+    background: var(--accent); color: #08121a; font-weight: 600;
+    border-radius: 6px; padding: 6px 12px; cursor: pointer; border: none;
+  }
+  label.file input { display: none; }
+
+  /* Summary bar */
+  .summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .sumbar { flex: 1 1 320px; height: 18px; border-radius: 4px; overflow: hidden; display: flex; border: 1px solid var(--border); min-width: 240px; }
+  .sumbar > span { height: 100%; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .counts { font-size: 11px; color: var(--muted); }
+
+  /* Main layout */
+  .main { flex: 1 1 auto; display: flex; min-height: 0; }
+  .view { flex: 1 1 auto; overflow: auto; position: relative; }
+  .side { flex: 0 0 320px; border-left: 1px solid var(--border); background: var(--surface); overflow: auto; padding: 12px; }
+  .side.hidden { display: none; }
+
+  /* Drop zone */
+  #drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--muted); text-align: center; padding: 40px; }
+  #drop.dragover { background: rgba(56,189,248,.08); outline: 2px dashed var(--accent); outline-offset: -12px; }
+  #drop h2 { color: var(--text); font-weight: 600; }
+
+  /* Gantt */
+  .gantt { position: relative; min-width: max-content; }
+  .timeaxis { position: sticky; top: 0; z-index: 5; display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .timeaxis .corner { position: sticky; left: 0; z-index: 6; width: 120px; flex: 0 0 120px; background: var(--surface); border-right: 1px solid var(--border); }
+  .daycell { flex: 0 0 auto; border-right: 1px solid var(--border); text-align: center; font-size: 10px; color: var(--muted); padding: 4px 0; }
+  .daycell.weekend { background: rgba(255,255,255,.03); }
+  .daycell.today { color: var(--accent); font-weight: 700; }
+  .lane { display: flex; border-bottom: 1px solid var(--border); position: relative; }
+  .lane .lanehdr { position: sticky; left: 0; z-index: 4; width: 120px; flex: 0 0 120px; background: var(--surface-2); border-right: 1px solid var(--border); padding: 6px 8px; font-size: 12px; }
+  .lane .lanehdr .cap { color: var(--muted); font-size: 10px; }
+  .lane .track { position: relative; flex: 1 1 auto; }
+  .grid { position: absolute; inset: 0; pointer-events: none; }
+  .grid .gcol { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--border); }
+  .grid .gcol.weekend { background: rgba(255,255,255,.03); }
+  .todayline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 3; }
+  .bar {
+    position: absolute; height: 30px; border-radius: 5px; color: #0a0a12; font-size: 11px;
+    padding: 0 6px; display: flex; align-items: center; overflow: hidden; white-space: nowrap;
+    cursor: grab; border: 1px solid rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.4);
+  }
+  .bar.selected { outline: 2px solid #fff; outline-offset: 1px; z-index: 4; }
+  .bar.dragging { opacity: .5; }
+  .bar.ripple-worse { animation: flashRed 1.2s ease-out; }
+  .bar.ripple-better { animation: flashGreen 1.2s ease-out; }
+  @keyframes flashRed { 0%,100%{box-shadow:0 1px 3px rgba(0,0,0,.4);} 30%{box-shadow:0 0 0 3px var(--red);} }
+  @keyframes flashGreen { 0%,100%{box-shadow:0 1px 3px rgba(0,0,0,.4);} 30%{box-shadow:0 0 0 3px var(--green);} }
+  .bar.dim { opacity: .25; }
+
+  /* WIP section */
+  .wipsection .lanehdr, .wipsection .bar { }
+  .secthead { position: sticky; left: 0; z-index: 4; display: flex; align-items: center; gap: 8px; background: #15152a; padding: 4px 10px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; cursor: pointer; }
+  .secthead .chev { transition: transform .15s; }
+  .secthead.collapsed .chev { transform: rotate(-90deg); }
+  .bar.wip { height: 24px; font-size: 10px; }
+
+  /* status colors */
+  .c-gray-dark { background: var(--gray-dark); color: #fff; }
+  .c-gray-light { background: var(--gray-light); }
+  .c-green { background: var(--green); }
+  .c-yellow { background: var(--yellow); }
+  .c-red { background: var(--red); color: #fff; }
+  .c-blue { background: var(--blue); color: #fff; }
+  .c-purple { background: var(--purple); color: #fff; }
+
+  /* List view */
+  .listview { padding: 8px 12px; }
+  .lgroup { margin-bottom: 12px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .lgroup > .ghead { background: var(--surface-2); padding: 6px 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .lgroup.collapsed .ltable { display: none; }
+  .ltable { width: 100%; border-collapse: collapse; }
+  .ltable th, .ltable td { text-align: left; padding: 5px 8px; border-top: 1px solid var(--border); font-size: 12px; }
+  .ltable th { color: var(--muted); font-weight: 600; background: var(--lane); position: sticky; }
+  .ltable tr.row { cursor: grab; }
+  .ltable tr.row:hover { background: rgba(255,255,255,.03); }
+  .ltable tr.dragging { opacity: .4; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+  /* Detail panel */
+  .side h3 { margin: 0 0 8px; font-size: 14px; }
+  .side .kv { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; font-size: 12px; margin-bottom: 10px; }
+  .side .kv .k { color: var(--muted); }
+  .shorttbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .shorttbl th, .shorttbl td { padding: 3px 5px; border-top: 1px solid var(--border); text-align: left; }
+  .shorttbl th { color: var(--muted); }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+  .comp-link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+  /* Modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .modal-bg.hidden { display: none; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; max-width: 720px; width: 90%; max-height: 80vh; overflow: auto; padding: 18px; }
+  .modal h2 { margin: 0 0 12px; font-size: 16px; }
+  .modal .cols { display: flex; gap: 16px; }
+  .modal .col { flex: 1 1 0; }
+  .modal .col h4 { margin: 0 0 6px; font-size: 13px; }
+  .vlist { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+  .vlist li { padding: 5px 8px; border-radius: 5px; margin-bottom: 4px; }
+  .vlist li.err { background: rgba(239,68,68,.15); border-left: 3px solid var(--red); }
+  .vlist li.warn { background: rgba(234,179,8,.13); border-left: 3px solid var(--yellow); }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  /* Tooltip */
+  #tip { position: fixed; z-index: 60; background: #0a0a14; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11px; max-width: 280px; pointer-events: none; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+  #tip table { border-collapse: collapse; }
+  #tip td { padding: 1px 4px; }
+  .nofile { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="titlebar">
+    <h1>Factory Scheduler — Gantt</h1>
+    <span class="ver">v1.2.2</span>
+    <span id="cdnwarn" class="nofile" style="color:var(--red);display:none;">⚠ SheetJS CDN blocked — file parsing unavailable.</span>
+    <div class="spacer"></div>
+    <div class="toolbar">
+      <label class="file">Load Workbook<input id="fileInput" type="file" accept=".xlsx,.xls,.csv" /></label>
+      <button id="btnGantt" class="active">Gantt</button>
+      <button id="btnList">List View</button>
+      <button id="btnAllLines" class="active" title="Toggle priority line only">All Lines</button>
+      <input id="search" type="search" placeholder="Search order / material…" />
+      <button id="btnZoomOut" title="Zoom out">−</button>
+      <button id="btnZoomIn" title="Zoom in">+</button>
+      <button id="btnExport" title="Export to Excel">Export</button>
+    </div>
+  </div>
+  <div class="summary">
+    <div id="sumbar" class="sumbar" aria-label="status breakdown"></div>
+    <div id="counts" class="counts"></div>
+  </div>
+  <div class="legend" id="legend"></div>
+</header>
+
+<div class="main">
+  <div class="view" id="view">
+    <div id="drop">
+      <h2>Drop your production workbook here</h2>
+      <div>or use <b>Load Workbook</b> above. Expected tabs: Orders, BOM, On Hand, Units Per Day, Shifts, Component Exclusions, SLOC Lead Times, Critical Components, Master Data.</div>
+    </div>
+    <div id="gantt" class="gantt" style="display:none;"></div>
+    <div id="list" class="listview" style="display:none;"></div>
+  </div>
+  <aside class="side hidden" id="side"></aside>
+</div>
+
+<div id="validationModal" class="modal-bg hidden">
+  <div class="modal">
+    <h2 id="vTitle">Workbook Validation</h2>
+    <div class="cols">
+      <div class="col"><h4 style="color:var(--red)">Errors (must fix)</h4><ul id="vErrors" class="vlist"></ul></div>
+      <div class="col"><h4 style="color:var(--yellow)">Warnings</h4><ul id="vWarnings" class="vlist"></ul></div>
+    </div>
+    <div class="actions">
+      <button id="vCancel">Cancel</button>
+      <button id="vProceed" class="active">Proceed Anyway</button>
+    </div>
+  </div>
+</div>
+
+<div id="compModal" class="modal-bg hidden">
+  <div class="modal" id="compModalBody"></div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+"use strict";
+/* ============================================================ Constants */
+const PRIORITY_LINE = '71E';
+const DAY_MS = 86400000;
+let MINUTES_PER_DAY = 480;            // recomputed from Shifts
+let TODAY = startOfDay(new Date());
+
+/* ============================================================ Global state */
+let rawData = null;        // parsed sheets keyed by logical name
+let model = null;          // computed model: lines, orders, maps
+let displayOrders = [];    // orders with computed status, in display order
+let manualSeq = new Map(); // order id -> manual sequence override (from drag)
+let dayWidth = 60;         // px per day (zoom 30..200)
+let selectedOrderId = null;
+let wipExpanded = false;
+let listView = false;
+let allLines = true;       // false = priority line only
+let searchTerm = '';
+let listCollapseState = {};// group key -> collapsed bool
+let dataSignature = '';    // preserves collapse state across reloads of same data
+let pendingProceed = null; // callback when user clicks "Proceed Anyway"
+
+/* ============================================================ Utilities */
+function startOfDay(d){ const x = new Date(d); x.setHours(0,0,0,0); return x; }
+function norm(s){ return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' '); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function isWeekend(d){ const k=d.getDay(); return k===0||k===6; }
+function fmtDate(d){ return d instanceof Date && !isNaN(d) ? `${d.getMonth()+1}/${d.getDate()}` : ''; }
+function fmtDateY(d){ return d instanceof Date && !isNaN(d) ? `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}` : ''; }
+function addWorkingDays(date, n){
+  const d = startOfDay(date); let added = 0;
+  while (added < n){ d.setDate(d.getDate()+1); if (!isWeekend(d)) added++; }
+  return d;
+}
+function workingDaysBetween(a, b){
+  let n = 0; const d = startOfDay(a); const end = startOfDay(b);
+  while (d < end){ if (!isWeekend(d)) n++; d.setDate(d.getDate()+1); }
+  return n;
+}
+// Convert a cell value (Date | Excel serial number | string) to a Date or null.
+function parseDate(v){
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  if (typeof v === 'number'){
+    // Excel serial: days since 1899-12-30
+    const d = new Date(Math.round((v - 25569) * DAY_MS));
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(v);
+  return isNaN(d) ? null : d;
+}
+function toNum(v){ if (v==null||v==='') return 0; const n = Number(String(v).replace(/[, ]/g,'')); return isNaN(n)?0:n; }
+
+/* ============================================================ Sheet parsing */
+const SHEET_ALIASES = {
+  orders:     ['orders','order'],
+  bom:        ['bom','bill of materials'],
+  onhand:     ['on hand','onhand','inventory'],
+  unitsperday:['units per day','data per day','units/day','per day'],
+  shifts:     ['shifts','shift'],
+  exclusions: ['component exclusions','exclusions'],
+  sloclead:   ['sloc lead times','sloc lead time','lead times'],
+  critical:   ['critical components','critical'],
+  master:     ['master data','master'],
+};
+const REQUIRED_SHEETS = ['orders','bom','onhand'];
+
+// Column alias sets (normalized) per logical field.
+const COL = {
+  // orders
+  order:     ['order','order id','order #','order number','prod order','production order'],
+  material:  ['material','material number','fg material','finished good'],
+  mrp:       ['mrp ctrlr','mrp controller','mrp','line','mrpctrlr'],
+  qty:       ['target qty','order quantity','qty','quantity','order qty'],
+  unit:      ['unit','uom'],
+  bscstart:  ['bsc start','basic start','basic start date','start','start date'],
+  bscfin:    ['basic fin.','basic fin','basic finish','finish','basic finish date'],
+  sched:     ['scheduledtimestamp','scheduled timestamp','scheduled','schedule'],
+  scan:      ['mountscantime','mount scan time','mount scan','scan time'],
+  seq:       ['sequence','seq','order'],
+  // bom
+  bomComp:   ['material','component','component material','comp'],
+  bomDesc:   ['material description','description','desc'],
+  openqty:   ['open quantity','open qty','remaining qty','remaining quantity','qty'],
+  // on hand
+  sloc:      ['sloc','sloc ','storage location','stor loc'],
+  unrestr:   ['unrestricted','unrestricted qty','available','available qty','on hand'],
+  // units per day
+  upLine:    ['line'],
+  upMrp:     ['mrp controller','mrp ctrlr','mrp'],
+  upUnits:   ['units per day','units/day','per day','units'],
+  // shifts
+  shStart:   ['start time','start'],
+  shStop:    ['stop time','end time','stop','finish'],
+  // sloc lead times
+  ltSloc:    ['sloc'],
+  ltLead:    ['lead time','lead time (days)','leadtime','days'],
+  ltDesc:    ['description','desc'],
+  ltInc:     ['include/exclude inventory?','include/exclude inventory','include/exclude','include','inventory'],
+  // master data
+  mdMaterial:['material'],
+  mdMrp:     ['mrp controller','mrp ctrlr'],
+  mdProc:    ['procurement type','proc type','procurement'],
+  mdMrpKey:  ['mrp'],
+  mdOwner:   ['owner'],
+};
+
+function pick(row, aliases){
+  for (const a of aliases){ if (a in row && row[a] !== '') return row[a]; }
+  for (const a of aliases){ if (a in row) return row[a]; }
+  return undefined;
+}
+function hasCol(headers, aliases){ return aliases.some(a => headers.includes(a)); }
+
+// Parse a worksheet into { headers:[normalized], rows:[{normHeader:value}] }
+function parseSheet(ws){
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+  if (!aoa.length) return { headers: [], rows: [] };
+  // find the header row (first non-empty row)
+  let hi = 0; while (hi < aoa.length && aoa[hi].every(c => c === '' || c == null)) hi++;
+  const headers = aoa[hi].map(norm);
+  const rows = [];
+  for (let r = hi + 1; r < aoa.length; r++){
+    const arr = aoa[r];
+    if (!arr || arr.every(c => c === '' || c == null)) continue;
+    const o = {};
+    headers.forEach((h, i) => { if (h !== '') o[h] = arr[i]; });
+    o.__rownum = r + 1;
+    rows.push(o);
+  }
+  return { headers, rows };
+}
+
+function findSheet(wb, aliases){
+  const names = wb.SheetNames;
+  for (const a of aliases){
+    const hit = names.find(n => norm(n) === a);
+    if (hit) return hit;
+  }
+  for (const a of aliases){
+    const hit = names.find(n => norm(n).includes(a));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/* ============================================================ Validation */
+function validateWorkbook(wb){
+  const errors = [], warnings = [];
+  const resolved = {};
+  for (const [key, aliases] of Object.entries(SHEET_ALIASES)){
+    const name = findSheet(wb, aliases);
+    resolved[key] = name;
+    if (!name){
+      if (REQUIRED_SHEETS.includes(key)) errors.push(`Required tab "${aliases[0]}" is missing.`);
+      else warnings.push(`Optional tab "${aliases[0]}" is missing — related features disabled.`);
+    }
+  }
+  // required columns on required sheets
+  const colChecks = {
+    orders: [['order', COL.order], ['quantity', COL.qty]],
+    bom:    [['order', COL.order], ['component material', COL.bomComp], ['open quantity', COL.openqty]],
+    onhand: [['material', COL.material], ['unrestricted qty', COL.unrestr]],
+  };
+  for (const [key, checks] of Object.entries(colChecks)){
+    if (!resolved[key]) continue;
+    const { headers } = parseSheet(wb.Sheets[resolved[key]]);
+    for (const [label, aliases] of checks){
+      if (!hasCol(headers, aliases)) errors.push(`Tab "${resolved[key]}" is missing a "${label}" column.`);
+    }
+  }
+  return { errors, warnings, resolved };
+}
+
+function showValidation({ errors, warnings }, onProceed){
+  const m = document.getElementById('validationModal');
+  const eUl = document.getElementById('vErrors'), wUl = document.getElementById('vWarnings');
+  eUl.innerHTML = errors.length ? errors.map(e=>`<li class="err">${esc(e)}</li>`).join('') : '<li class="nofile">None</li>';
+  wUl.innerHTML = warnings.length ? warnings.map(w=>`<li class="warn">${esc(w)}</li>`).join('') : '<li class="nofile">None</li>';
+  const proceedBtn = document.getElementById('vProceed');
+  document.getElementById('vTitle').textContent = errors.length ? 'Workbook has blocking errors' : 'Workbook validation';
+  proceedBtn.style.display = errors.length ? 'none' : '';
+  pendingProceed = errors.length ? null : onProceed;
+  m.classList.remove('hidden');
+}
+function closeValidation(){ document.getElementById('validationModal').classList.add('hidden'); pendingProceed = null; }
+
+/* ============================================================ Build model */
+function buildModel(wb, resolved){
+  const get = (key) => resolved[key] ? parseSheet(wb.Sheets[resolved[key]]) : { headers: [], rows: [] };
+
+  // Units Per Day -> lines
+  const lines = []; const lineByMrp = {};
+  for (const r of get('unitsperday').rows){
+    const mrp = String(pick(r, COL.upMrp) ?? '').trim();
+    const line = String(pick(r, COL.upLine) ?? '').trim();
+    const units = toNum(pick(r, COL.upUnits));
+    if (!mrp && !line) continue;
+    const rec = { mrp, line: line || mrp, unitsPerDay: units || 1 };
+    lines.push(rec); lineByMrp[mrp] = rec;
+  }
+
+  // Shifts -> MINUTES_PER_DAY
+  let totalMin = 0;
+  for (const r of get('shifts').rows){
+    const s = pick(r, COL.shStart), e = pick(r, COL.shStop);
+    const mins = shiftMinutes(s, e);
+    if (mins > 0) totalMin += mins;
+  }
+  if (totalMin > 0) MINUTES_PER_DAY = totalMin;
+
+  // SLOC lead times -> include/exclude + lead time
+  const slocInfo = {};
+  for (const r of get('sloclead').rows){
+    const sloc = String(pick(r, COL.ltSloc) ?? '').trim();
+    if (!sloc) continue;
+    const incRaw = norm(pick(r, COL.ltInc));
+    slocInfo[sloc] = {
+      leadTime: toNum(pick(r, COL.ltLead)),
+      desc: String(pick(r, COL.ltDesc) ?? '').trim(),
+      include: incRaw === '' ? true : incRaw.startsWith('inc'),
+    };
+  }
+
+  // Critical / exclusions (single-column lists)
+  const critical = new Set(get('critical').rows.map(r => String(pick(r, COL.material) ?? '').trim()).filter(Boolean));
+  const exclusions = new Set(get('exclusions').rows.map(r => String(pick(r, COL.material) ?? '').trim()).filter(Boolean));
+
+  // Master data: material -> {mrpController, procType}; mrpController -> owner
+  const masterByMat = {}, ownerByMrp = {};
+  for (const r of get('master').rows){
+    const mat = String(pick(r, COL.mdMaterial) ?? '').trim();
+    if (mat) masterByMat[mat] = { mrpController: String(pick(r, COL.mdMrp) ?? '').trim(), procType: String(pick(r, COL.mdProc) ?? '').trim().toUpperCase() };
+    const mrpKey = String(pick(r, COL.mdMrpKey) ?? '').trim();
+    const owner = String(pick(r, COL.mdOwner) ?? '').trim();
+    if (mrpKey && owner) ownerByMrp[mrpKey] = owner;
+  }
+
+  // On hand -> available inventory by material (Include SLOCs only) + per-SLOC detail
+  const avail = {}; const onHandDetail = {};
+  for (const r of get('onhand').rows){
+    const mat = String(pick(r, COL.material) ?? '').trim();
+    const sloc = String(pick(r, COL.sloc) ?? '').trim();
+    const qty = toNum(pick(r, COL.unrestr));
+    if (!mat) continue;
+    const info = slocInfo[sloc];
+    const include = info ? info.include : true;
+    (onHandDetail[mat] ||= []).push({ sloc, qty, include, leadTime: info ? info.leadTime : 0, desc: info ? info.desc : '' });
+    if (include) avail[mat] = (avail[mat] || 0) + qty;
+  }
+
+  // BOM -> by order
+  const bomByOrder = {};
+  for (const r of get('bom').rows){
+    const ord = String(pick(r, COL.order) ?? '').trim();
+    const comp = String(pick(r, COL.bomComp) ?? '').trim();
+    if (!ord || !comp) continue;
+    (bomByOrder[ord] ||= []).push({
+      component: comp,
+      desc: String(pick(r, COL.bomDesc) ?? '').trim(),
+      need: toNum(pick(r, COL.openqty)),
+    });
+  }
+
+  // Orders
+  const orders = [];
+  for (const r of get('orders').rows){
+    const id = String(pick(r, COL.order) ?? '').trim();
+    if (!id) continue;
+    const mrp = String(pick(r, COL.mrp) ?? '').trim();
+    const sched = parseDate(pick(r, COL.sched));
+    const scan = parseDate(pick(r, COL.scan));
+    orders.push({
+      id,
+      material: String(pick(r, COL.material) ?? '').trim(),
+      mrp,
+      line: (lineByMrp[mrp] && lineByMrp[mrp].line) || mrp || 'Unassigned',
+      unitsPerDay: (lineByMrp[mrp] && lineByMrp[mrp].unitsPerDay) || 1,
+      qty: toNum(pick(r, COL.qty)),
+      bscStart: parseDate(pick(r, COL.bscstart)),
+      bscFin: parseDate(pick(r, COL.bscfin)),
+      scheduled: sched,
+      scan,
+      seq: toNum(pick(r, COL.seq)),
+      type: scan ? 'wip' : (sched ? 'scheduled' : 'unscheduled'),
+    });
+  }
+
+  return { lines, lineByMrp, slocInfo, critical, exclusions, masterByMat, ownerByMrp, avail, onHandDetail, bomByOrder, orders };
+}
+
+// Shift duration in minutes (handles overnight where stop < start).
+function shiftMinutes(start, stop){
+  const a = toMinutes(start), b = toMinutes(stop);
+  if (a == null || b == null) return 0;
+  return b > a ? b - a : (b + 1440) - a;
+}
+function toMinutes(v){
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return v.getHours()*60 + v.getMinutes();
+  if (typeof v === 'number'){ // excel time fraction of a day
+    if (v > 0 && v < 1) return Math.round(v * 1440);
+    return null;
+  }
+  const m = String(v).match(/(\d{1,2}):(\d{2})/);
+  return m ? (+m[1])*60 + (+m[2]) : null;
+}
+
+/* ============================================================ Sequencing + consumption */
+function buildGlobalSequence(orders){
+  // WIP first (by scan time), then scheduled (by scheduled timestamp),
+  // then unscheduled (by Sequence column / MountScan fallback).
+  const rank = { wip: 0, scheduled: 1, unscheduled: 2 };
+  return orders.slice().sort((a, b) => {
+    if (manualSeq.has(a.id) || manualSeq.has(b.id)){
+      const ma = manualSeq.has(a.id) ? manualSeq.get(a.id) : Infinity;
+      const mb = manualSeq.has(b.id) ? manualSeq.get(b.id) : Infinity;
+      if (ma !== mb) return ma - mb;
+    }
+    if (rank[a.type] !== rank[b.type]) return rank[a.type] - rank[b.type];
+    if (a.type === 'wip') return (a.scan||0) - (b.scan||0);
+    if (a.type === 'scheduled') return (a.scheduled||0) - (b.scheduled||0);
+    if (a.seq !== b.seq) return a.seq - b.seq;
+    return (a.scan||0) - (b.scan||0);
+  });
+}
+
+function computeAll(){
+  const seq = buildGlobalSequence(model.orders);
+  const pool = Object.assign({}, model.avail); // material -> remaining available
+  for (const o of seq){
+    const bom = model.bomByOrder[o.id] || [];
+    const comps = [];
+    let hasShortage = false, hasCritical = false, anyAllocated = false;
+    for (const b of bom){
+      const excluded = model.exclusions.has(b.component);
+      const critical = model.critical.has(b.component);
+      const md = model.masterByMat[b.component] || {};
+      const owner = md.mrpController ? (model.ownerByMrp[md.mrpController] || '') : '';
+      let allocated = 0, deficit = 0;
+      if (excluded){
+        allocated = b.need; // excluded components never constrain
+      } else {
+        const have = pool[b.component] || 0;
+        allocated = Math.min(b.need, have);
+        pool[b.component] = have - allocated;
+        deficit = b.need - allocated;
+        if (deficit > 0){ hasShortage = true; if (critical) hasCritical = true; }
+        if (allocated > 0) anyAllocated = true;
+      }
+      comps.push({ ...b, excluded, critical, procType: md.procType || '', owner, allocated, deficit });
+    }
+    o.components = comps;
+    o.hasShortage = hasShortage;
+    o.hasCritical = hasCritical;
+    o.coverage = !hasShortage ? 'full' : (anyAllocated ? 'partial' : 'none');
+    o.status = classifyStatus(o);
+  }
+  computeProjectedDates(seq);
+  model.sequence = seq;
+}
+
+// Status -> color class + summary category.
+function classifyStatus(o){
+  if (o.type === 'wip')        return o.hasShortage ? 'gray-light' : 'gray-dark';
+  if (o.type === 'scheduled')  return o.hasShortage ? 'purple' : 'blue';
+  if (o.hasCritical)           return 'red';
+  if (o.hasShortage)           return 'yellow';
+  return 'green';
+}
+const STATUS_LABEL = { 'gray-dark':'WIP', 'gray-light':'WIP (short)', 'blue':'Scheduled', 'purple':'Scheduled (short)', 'green':'Ready', 'yellow':'Missing', 'red':'Critical' };
+
+function computeProjectedDates(seq){
+  // Per line, lay orders end-to-end on working days from TODAY (WIP starts now).
+  const cursor = {}; // line -> Date
+  const byLine = {};
+  for (const o of seq){ (byLine[o.line] ||= []).push(o); }
+  for (const line of Object.keys(byLine)){
+    let c = new Date(TODAY);
+    for (const o of byLine[line]){
+      const days = Math.max(1, Math.ceil(o.qty / (o.unitsPerDay || 1)));
+      o.projStart = new Date(c);
+      o.projFinish = addWorkingDays(c, days);
+      o.projDays = days;
+      c = new Date(o.projFinish);
+    }
+  }
+}
+
+/* ============================================================ Rendering */
+function recompute(){
+  computeAll();
+  displayOrders = model.sequence.slice();
+  render();
+}
+
+function render(){
+  document.getElementById('drop').style.display = 'none';
+  document.getElementById('side').classList.toggle('hidden', !selectedOrderId);
+  renderSummary();
+  document.getElementById('gantt').style.display = listView ? 'none' : 'block';
+  document.getElementById('list').style.display = listView ? 'block' : 'none';
+  if (listView) renderListView(); else renderGantt();
+  if (selectedOrderId) renderDetail(selectedOrderId);
+}
+
+function visibleOrders(){
+  return displayOrders.filter(o => allLines || o.mrp === PRIORITY_LINE || o.line === 'E-Line');
+}
+function matchesSearch(o){
+  if (!searchTerm) return true;
+  const t = searchTerm.toLowerCase();
+  return o.id.toLowerCase().includes(t) || (o.material||'').toLowerCase().includes(t);
+}
+
+function renderSummary(){
+  const cats = [
+    ['gray-dark','WIP','var(--gray-dark)'],
+    ['gray-light','WIP short','var(--gray-light)'],
+    ['blue','Scheduled','var(--blue)'],
+    ['purple','Sched short','var(--purple)'],
+    ['green','Ready','var(--green)'],
+    ['yellow','Missing','var(--yellow)'],
+    ['red','Critical','var(--red)'],
+  ];
+  const counts = {}; cats.forEach(c => counts[c[0]] = 0);
+  const orders = visibleOrders();
+  orders.forEach(o => { counts[o.status] = (counts[o.status]||0) + 1; });
+  const total = orders.length || 1;
+  document.getElementById('sumbar').innerHTML = cats.map(([k,,col]) =>
+    counts[k] ? `<span style="width:${(counts[k]/total*100).toFixed(2)}%;background:${col}" title="${STATUS_LABEL[k]}: ${counts[k]}"></span>` : ''
+  ).join('');
+  document.getElementById('counts').textContent =
+    `${orders.length} orders · ` + cats.filter(c=>counts[c[0]]).map(([k,lbl]) => `${lbl} ${counts[k]}`).join(' · ');
+  document.getElementById('legend').innerHTML = cats.map(([,lbl,col]) => `<span><i style="background:${col}"></i>${lbl}</span>`).join('');
+}
+
+function dayRange(orders){
+  let min = new Date(TODAY), max = addWorkingDays(TODAY, 5);
+  orders.forEach(o => {
+    if (o.projStart && o.projStart < min) min = o.projStart;
+    if (o.projFinish && o.projFinish > max) max = o.projFinish;
+  });
+  min = startOfDay(min); max = startOfDay(max);
+  const days = [];
+  for (let d = new Date(min); d <= max; d.setDate(d.getDate()+1)) days.push(new Date(d));
+  return days;
+}
+
+function renderGantt(){
+  const g = document.getElementById('gantt');
+  const wip = displayOrders.filter(o => o.type === 'wip' && matchesSearch(o));
+  const main = visibleOrders().filter(o => o.type !== 'wip');
+  const allForRange = visibleOrders();
+  const days = dayRange(allForRange.length ? allForRange : displayOrders);
+  const trackW = days.length * dayWidth;
+
+  // time axis
+  let html = `<div class="timeaxis"><div class="corner"></div>` +
+    days.map(d => `<div class="daycell ${isWeekend(d)?'weekend':''} ${+startOfDay(d)===+TODAY?'today':''}" style="width:${dayWidth}px">${fmtDate(d)}</div>`).join('') +
+    `</div>`;
+
+  // WIP collapsible section
+  html += `<div class="secthead ${wipExpanded?'':'collapsed'}" id="wiphead"><span class="chev">▾</span> WIP (${wip.length})</div>`;
+  if (wipExpanded){
+    html += renderLanes(groupByLine(wip), days, trackW, true);
+  }
+
+  // main lanes grouped by line
+  html += renderLanes(groupByLine(main), days, trackW, false);
+  g.innerHTML = html;
+
+  // grid + bars positioning is inline; wire events
+  document.getElementById('wiphead').onclick = () => { wipExpanded = !wipExpanded; render(); };
+  g.querySelectorAll('.bar').forEach(setupBarEvents);
+  setupGanttDrag(g, days);
+}
+
+function groupByLine(orders){
+  const m = new Map();
+  orders.forEach(o => { if (!m.has(o.line)) m.set(o.line, []); m.get(o.line).push(o); });
+  return m;
+}
+
+function renderLanes(grouped, days, trackW, isWip){
+  const min = days[0];
+  let html = '';
+  for (const [line, orders] of grouped){
+    const cap = orders[0] ? orders[0].unitsPerDay : '';
+    const gridCols = days.map((d,i) => `<div class="gcol ${isWeekend(d)?'weekend':''}" style="left:${i*dayWidth}px;width:${dayWidth}px"></div>`).join('');
+    const todayIdx = days.findIndex(d => +startOfDay(d) === +TODAY);
+    const todayLine = todayIdx>=0 ? `<div class="todayline" style="left:${todayIdx*dayWidth}px"></div>` : '';
+    const bars = orders.map(o => {
+      const offset = workingDaysBetween(min, o.projStart);
+      const left = offset * dayWidth;
+      const w = Math.max(dayWidth*0.6, (o.projDays||1) * dayWidth - 3);
+      const dim = !matchesSearch(o) ? 'dim' : '';
+      const sel = o.id === selectedOrderId ? 'selected' : '';
+      return `<div class="bar c-${o.status} ${isWip?'wip':''} ${dim} ${sel}" draggable="true" data-id="${esc(o.id)}"
+        style="left:${left}px;width:${w}px;top:${isWip?4:6}px">${esc(o.id)} · ${o.qty}</div>`;
+    }).join('');
+    html += `<div class="lane ${isWip?'wipsection':''}">
+      <div class="lanehdr">${esc(line)}<div class="cap">${cap} /day</div></div>
+      <div class="track" style="width:${trackW}px;height:${isWip?34:44}px">
+        <div class="grid">${gridCols}${todayLine}</div>${bars}
+      </div></div>`;
+  }
+  if (!grouped.size) html += `<div class="lane"><div class="lanehdr"> </div><div class="track" style="width:${trackW}px;height:30px"></div></div>`;
+  return html;
+}
+
+/* ---------------- Bar events: select, tooltip, drag ---------------- */
+function setupBarEvents(bar){
+  const id = bar.dataset.id;
+  bar.addEventListener('click', () => selectOrder(id));
+  bar.addEventListener('mousemove', (e) => showTip(e, id));
+  bar.addEventListener('mouseleave', hideTip);
+}
+function selectOrder(id){ selectedOrderId = id; render(); }
+
+let dragId = null;
+function setupGanttDrag(container, days){
+  container.querySelectorAll('.bar').forEach(bar => {
+    bar.addEventListener('dragstart', (e) => { dragId = bar.dataset.id; bar.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
+    bar.addEventListener('dragend', () => { bar.classList.remove('dragging'); dragId = null; });
+    bar.addEventListener('dragover', (e) => e.preventDefault());
+    bar.addEventListener('drop', (e) => { e.preventDefault(); if (dragId && dragId !== bar.dataset.id) reorder(dragId, bar.dataset.id); });
+  });
+}
+
+// Move dragged order to just before the target in the global sequence, recompute,
+// and flash any orders whose status changed (ripple).
+function reorder(fromId, toId){
+  const before = new Map(displayOrders.map(o => [o.id, o.status]));
+  const seq = model.sequence.map(o => o.id);
+  const fi = seq.indexOf(fromId), ti = seq.indexOf(toId);
+  if (fi < 0 || ti < 0) return;
+  seq.splice(fi, 1); seq.splice(seq.indexOf(toId), 0, fromId);
+  seq.forEach((id, i) => manualSeq.set(id, i));
+  recompute();
+  detectRipple(before);
+}
+
+function detectRipple(before){
+  const severity = { 'green':0,'blue':1,'gray-dark':1,'gray-light':2,'purple':2,'yellow':3,'red':4 };
+  displayOrders.forEach(o => {
+    const prev = before.get(o.id);
+    if (prev == null || prev === o.status) return;
+    const cls = severity[o.status] > severity[prev] ? 'ripple-worse' : 'ripple-better';
+    document.querySelectorAll(`.bar[data-id="${CSS.escape(o.id)}"]`).forEach(b => b.classList.add(cls));
+  });
+}
+
+/* ---------------- Tooltip ---------------- */
+function showTip(e, id){
+  const o = displayOrders.find(x => x.id === id); if (!o) return;
+  const tip = document.getElementById('tip');
+  const rows = (o.components||[]).map(c => {
+    const st = c.excluded ? 'excluded' : (c.deficit>0 ? `short ${c.deficit}` : 'ok');
+    const col = c.excluded ? 'var(--muted)' : (c.deficit>0 ? (c.critical?'var(--red)':'var(--yellow)') : 'var(--green)');
+    return `<tr><td>${esc(c.component)}</td><td>${esc(c.desc||'')}</td><td style="color:${col};text-align:right">${st}</td></tr>`;
+  }).join('');
+  tip.innerHTML = `<b>${esc(o.id)}</b> · ${esc(o.line)} · qty ${o.qty}<br>
+    <span style="color:var(--muted)">${STATUS_LABEL[o.status]} · ${fmtDate(o.projStart)}–${fmtDate(o.projFinish)}</span>
+    <table>${rows||'<tr><td>No BOM</td></tr>'}</table>`;
+  tip.style.display = 'block';
+  tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 300) + 'px';
+  tip.style.top = Math.min(e.clientY + 14, window.innerHeight - 200) + 'px';
+}
+function hideTip(){ document.getElementById('tip').style.display = 'none'; }
+
+/* ---------------- Detail panel ---------------- */
+function renderDetail(id){
+  const o = displayOrders.find(x => x.id === id);
+  const side = document.getElementById('side');
+  if (!o){ side.classList.add('hidden'); return; }
+  side.classList.remove('hidden');
+  const shortRows = (o.components||[]).map(c => {
+    const tag = c.excluded ? `<span class="pill" style="background:var(--muted);color:#000">excl</span>`
+      : c.deficit>0 ? `<span class="pill" style="background:${c.critical?'var(--red)':'var(--yellow)'};color:#000">${c.critical?'critical':'short'}</span>`
+      : `<span class="pill" style="background:var(--green);color:#000">ok</span>`;
+    return `<tr><td><span class="comp-link" data-comp="${esc(c.component)}">${esc(c.component)}</span></td>
+      <td>${esc(c.desc||'')}</td><td>${c.need}</td><td>${c.deficit||0}</td><td>${esc(c.owner||'')}</td><td>${tag}</td></tr>`;
+  }).join('');
+  side.innerHTML = `
+    <h3>${esc(o.id)} <span class="pill c-${o.status}">${STATUS_LABEL[o.status]}</span></h3>
+    <div class="kv">
+      <div class="k">Material</div><div>${esc(o.material||'')}</div>
+      <div class="k">Line</div><div>${esc(o.line)} (${o.unitsPerDay}/day)</div>
+      <div class="k">Quantity</div><div>${o.qty}</div>
+      <div class="k">Mount scan</div><div>${o.scan?fmtDateY(o.scan):'—'}</div>
+      <div class="k">Scheduled</div><div>${o.scheduled?fmtDateY(o.scheduled):'—'}</div>
+      <div class="k">Proj. start</div><div>${fmtDateY(o.projStart)}</div>
+      <div class="k">Proj. finish</div><div>${fmtDateY(o.projFinish)} (${o.projDays}d)</div>
+    </div>
+    <h3 style="font-size:13px">Components</h3>
+    <table class="shorttbl"><tr><th>Comp</th><th>Desc</th><th>Need</th><th>Short</th><th>Owner</th><th></th></tr>${shortRows||'<tr><td colspan=6>No BOM</td></tr>'}</table>
+  `;
+  side.querySelectorAll('.comp-link').forEach(el => el.onclick = () => showCompModal(el.dataset.comp));
+}
+
+/* ---------------- Component modal ---------------- */
+function showCompModal(comp){
+  const detail = model.onHandDetail[comp] || [];
+  const md = model.masterByMat[comp] || {};
+  const owner = md.mrpController ? (model.ownerByMrp[md.mrpController]||'') : '';
+  const totalInc = detail.filter(d=>d.include).reduce((s,d)=>s+d.qty,0);
+  const totalExc = detail.filter(d=>!d.include).reduce((s,d)=>s+d.qty,0);
+  const rows = detail.map(d => `<tr><td>${esc(d.sloc)}</td><td>${esc(d.desc||'')}</td><td style="text-align:right">${d.qty}</td>
+     <td>${d.leadTime}d</td><td>${d.include?'<span style="color:var(--green)">include</span>':'<span style="color:var(--muted)">exclude</span>'}</td></tr>`).join('');
+  const body = document.getElementById('compModalBody');
+  body.innerHTML = `
+    <h2>${esc(comp)} ${model.critical.has(comp)?'<span class="pill" style="background:var(--red);color:#fff">critical</span>':''}
+       ${model.exclusions.has(comp)?'<span class="pill" style="background:var(--muted)">excluded</span>':''}</h2>
+    <div class="kv"><div class="k">Procurement</div><div>${esc(md.procType||'—')} ${md.procType==='E'?'(in-house)':md.procType==='F'?'(purchased)':md.procType==='X'?'(both)':''}</div>
+      <div class="k">MRP controller</div><div>${esc(md.mrpController||'—')}</div>
+      <div class="k">Owner</div><div>${esc(owner||'—')}</div>
+      <div class="k">Available</div><div>${totalInc} <span style="color:var(--muted)">(+${totalExc} excluded SLOCs)</span></div></div>
+    <table class="shorttbl"><tr><th>SLOC</th><th>Description</th><th>Qty</th><th>Lead</th><th>Inv</th></tr>${rows||'<tr><td colspan=5>No inventory</td></tr>'}</table>
+    <div class="actions"><button onclick="document.getElementById('compModal').classList.add('hidden')">Close</button></div>`;
+  document.getElementById('compModal').classList.remove('hidden');
+}
+
+/* ---------------- List view (grouped by MRP controller, collapsible, drag) ---------------- */
+function renderListView(){
+  const list = document.getElementById('list');
+  const orders = visibleOrders();
+  const groups = new Map();
+  orders.forEach(o => { const k = o.mrp || o.line; if (!groups.has(k)) groups.set(k,[]); groups.get(k).push(o); });
+  let html = '';
+  for (const [grp, ords] of groups){
+    const collapsed = listCollapseState[grp];
+    const rows = ords.map(o => {
+      const dim = !matchesSearch(o) ? 'style="opacity:.3"' : '';
+      const shortTxt = o.hasShortage ? (o.components.filter(c=>c.deficit>0).map(c=>c.component).join(', ')) : '';
+      return `<tr class="row ${o.id===selectedOrderId?'selected':''}" draggable="true" data-id="${esc(o.id)}" ${dim}>
+        <td><span class="swatch c-${o.status}"></span>${esc(o.id)}</td>
+        <td>${esc(o.material||'')}</td><td>${esc(o.line)}</td><td>${o.qty}</td>
+        <td>${STATUS_LABEL[o.status]}</td>
+        <td>${fmtDate(o.projStart)}–${fmtDate(o.projFinish)}</td>
+        <td style="color:var(--yellow)">${esc(shortTxt)}</td></tr>`;
+    }).join('');
+    html += `<div class="lgroup ${collapsed?'collapsed':''}" data-grp="${esc(grp)}">
+      <div class="ghead"><span class="chev">▾</span> ${esc(grp)} <span class="counts">(${ords.length})</span></div>
+      <table class="ltable"><tr><th>Order</th><th>Material</th><th>Line</th><th>Qty</th><th>Status</th><th>Projected</th><th>Shortages</th></tr>${rows}</table>
+    </div>`;
+  }
+  list.innerHTML = html || '<div class="nofile" style="padding:20px">No orders to display.</div>';
+  list.querySelectorAll('.ghead').forEach(h => h.onclick = () => {
+    const grp = h.parentElement.dataset.grp; listCollapseState[grp] = !listCollapseState[grp]; renderListView();
+  });
+  list.querySelectorAll('tr.row').forEach(tr => {
+    tr.addEventListener('click', () => selectOrder(tr.dataset.id));
+    tr.addEventListener('mousemove', e => showTip(e, tr.dataset.id));
+    tr.addEventListener('mouseleave', hideTip);
+  });
+  setupListDrag(list);
+}
+
+function setupListDrag(list){
+  list.querySelectorAll('tr.row').forEach(tr => {
+    tr.addEventListener('dragstart', () => { dragId = tr.dataset.id; tr.classList.add('dragging'); });
+    tr.addEventListener('dragend', () => { tr.classList.remove('dragging'); dragId = null; });
+    tr.addEventListener('dragover', e => e.preventDefault());
+    tr.addEventListener('drop', e => { e.preventDefault(); if (dragId && dragId !== tr.dataset.id) reorder(dragId, tr.dataset.id); });
+  });
+}
+
+/* ============================================================ Excel export */
+function exportExcel(){
+  const wb = buildExportWorkbook();
+  if (wb) XLSX.writeFile(wb, 'schedule-export.xlsx');
+}
+function buildExportWorkbook(){
+  if (typeof XLSX === 'undefined') return null;
+  const orders = visibleOrders();
+  const wb = XLSX.utils.book_new();
+
+  // 1) List View
+  const listAoa = [['Order','Material','Line','Qty','Status','Proj Start','Proj Finish','Shortages']];
+  orders.forEach(o => listAoa.push([o.id, o.material, o.line, o.qty, STATUS_LABEL[o.status],
+    fmtDateY(o.projStart), fmtDateY(o.projFinish), (o.components||[]).filter(c=>c.deficit>0).map(c=>`${c.component}(${c.deficit})`).join('; ')]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(listAoa), 'List View');
+
+  // 2) 7-Day Shortages: orders whose projected finish is within 7 days and short
+  const cutoff = addWorkingDays(TODAY, 7);
+  const shortAoa = [['Order','Line','Component','Description','Need','Short','Critical','Proj Finish']];
+  orders.filter(o => o.hasShortage && o.projFinish <= cutoff).forEach(o => {
+    o.components.filter(c => c.deficit>0).forEach(c =>
+      shortAoa.push([o.id, o.line, c.component, c.desc, c.need, c.deficit, c.critical?'YES':'', fmtDateY(o.projFinish)]));
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shortAoa), '7-Day Shortages');
+
+  // 3) Call Back List: shortages grouped by component, with owner/procurement & lead time
+  const byComp = new Map();
+  orders.forEach(o => (o.components||[]).filter(c=>c.deficit>0).forEach(c => {
+    if (!byComp.has(c.component)) byComp.set(c.component, { desc:c.desc, owner:c.owner, proc:c.procType, critical:c.critical, total:0, orders:[] });
+    const e = byComp.get(c.component); e.total += c.deficit; e.orders.push(o.id);
+  }));
+  const cbAoa = [['Component','Description','Owner','Procurement','Critical','Total Short','Lead Time','Orders']];
+  for (const [comp, e] of byComp){
+    const lead = Math.max(0, ...(model.onHandDetail[comp]||[{leadTime:0}]).map(d=>d.leadTime));
+    cbAoa.push([comp, e.desc, e.owner, e.proc, e.critical?'YES':'', e.total, lead, e.orders.join(', ')]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cbAoa), 'Call Back List');
+  return wb;
+}
+
+/* ============================================================ File loading */
+function loadArrayBuffer(buf){
+  if (typeof XLSX === 'undefined'){ document.getElementById('cdnwarn').style.display='inline'; return; }
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const v = validateWorkbook(wb);
+  const proceed = () => {
+    closeValidation();
+    rawData = wb;
+    model = buildModel(wb, v.resolved);
+    // preserve list collapse state only if the data signature matches
+    const sig = wb.SheetNames.join('|') + ':' + model.orders.length;
+    if (sig !== dataSignature){ listCollapseState = {}; dataSignature = sig; }
+    manualSeq.clear();
+    recompute();
+  };
+  if (v.errors.length || v.warnings.length) showValidation(v, proceed);
+  else proceed();
+}
+
+function handleFile(file){
+  const reader = new FileReader();
+  reader.onload = (e) => loadArrayBuffer(e.target.result);
+  reader.readAsArrayBuffer(file);
+}
+
+/* ============================================================ Wire up UI */
+function setZoom(delta){ dayWidth = Math.max(30, Math.min(200, dayWidth + delta)); if (model) render(); }
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (typeof XLSX === 'undefined') document.getElementById('cdnwarn').style.display = 'inline';
+  document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  const drop = document.getElementById('drop'), view = document.getElementById('view');
+  ['dragenter','dragover'].forEach(ev => view.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(ev => view.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('dragover'); }));
+  view.addEventListener('drop', e => { if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+
+  document.getElementById('btnGantt').onclick = () => { listView=false; setBtns(); render(); };
+  document.getElementById('btnList').onclick  = () => { listView=true; setBtns(); render(); };
+  document.getElementById('btnAllLines').onclick = (e) => { allLines = !allLines; e.target.textContent = allLines?'All Lines':'Priority (71E)'; e.target.classList.toggle('active', allLines); if (model) render(); };
+  document.getElementById('search').addEventListener('input', e => { searchTerm = e.target.value.trim(); if (model) render(); });
+  document.getElementById('btnZoomIn').onclick = () => setZoom(20);
+  document.getElementById('btnZoomOut').onclick = () => setZoom(-20);
+  document.getElementById('btnExport').onclick = () => { if (model) exportExcel(); };
+
+  document.getElementById('vCancel').onclick = closeValidation;
+  document.getElementById('vProceed').onclick = () => { if (pendingProceed) pendingProceed(); };
+  document.getElementById('compModal').addEventListener('click', e => { if (e.target.id==='compModal') e.target.classList.add('hidden'); });
+
+  // test hook
+  window.__app = { loadArrayBuffer, get model(){return model;}, get displayOrders(){return displayOrders;}, exportExcel, buildExportWorkbook, recompute, selectOrder, reorder };
+});
+function setBtns(){ document.getElementById('btnGantt').classList.toggle('active', !listView); document.getElementById('btnList').classList.toggle('active', listView); }
+</script>
+</body>
+</html>
