@@ -11,26 +11,29 @@
   /* Explicit colors only — no reliance on an external theme so the app renders
      identically in sandboxed / embedded contexts. */
   :root {
-    --bg: #0b0b16;
-    --surface: #1a1a2e;
-    --surface-2: #20203a;
-    --lane: #0f0f1e;
-    --border: #2c2c4a;
-    --text: #e8e8f2;
-    --muted: #9aa0b4;
-    --gray-dark: #6b7280;   /* WIP active */
-    --gray-light: #9ca3af;  /* WIP missing components */
-    --green: #22c55e;       /* ready / fully covered */
-    --yellow: #eab308;      /* missing non-critical */
+    --bg: #0b0e1a;
+    --bg2: #131a2e;
+    --surface: #161c30;
+    --surface-2: #1d2540;
+    --lane: #0f1426;
+    --border: #2a3252;
+    --text: #e8ecf6;
+    --muted: #97a0bd;
+    --gold: #f0b429;        /* priority / call-to-action accent */
+    --gray-dark: #5b6478;   /* WIP active */
+    --gray-light: #98a1b8;  /* WIP missing components */
+    --green: #34d399;       /* ready / fully covered */
+    --yellow: #b59f3b;      /* missing non-critical (olive) */
     --red: #ef4444;         /* critical shortage */
-    --blue: #3b82f6;        /* scheduled, covered */
-    --purple: #a855f7;      /* scheduled, deficit */
+    --blue: #2dd4bf;        /* scheduled, covered (teal) */
+    --purple: #8b5cf6;      /* scheduled, deficit */
     --accent: #38bdf8;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
-    background: var(--bg); color: var(--text);
+    background: radial-gradient(1200px 700px at 50% -10%, var(--bg2), var(--bg) 60%);
+    color: var(--text);
     font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     display: flex; flex-direction: column; height: 100vh; overflow: hidden;
   }
@@ -70,13 +73,19 @@
   /* Main layout */
   .main { flex: 1 1 auto; display: flex; min-height: 0; }
   .view { flex: 1 1 auto; overflow: auto; position: relative; }
-  .side { flex: 0 0 320px; border-left: 1px solid var(--border); background: var(--surface); overflow: auto; padding: 12px; }
-  .side.hidden { display: none; }
 
-  /* Drop zone */
-  #drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: var(--muted); text-align: center; padding: 40px; }
-  #drop.dragover { background: rgba(56,189,248,.08); outline: 2px dashed var(--accent); outline-offset: -12px; }
-  #drop h2 { color: var(--text); font-weight: 600; }
+  /* Splash / drop zone */
+  #drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 6px; color: var(--muted); text-align: center; padding: 40px; }
+  #drop.dragover { background: rgba(240,180,41,.06); outline: 2px dashed var(--gold); outline-offset: -16px; }
+  #drop .emoji { font-size: 46px; line-height: 1; margin-bottom: 6px; filter: drop-shadow(0 4px 10px rgba(0,0,0,.5)); }
+  #drop h2 { color: var(--text); font-weight: 700; font-size: 30px; margin: 0; letter-spacing: .3px; }
+  #drop .tag { color: var(--muted); font-size: 13px; max-width: 560px; }
+  #drop .tag .gold { color: var(--gold); font-weight: 600; }
+  #drop .dropbox { margin-top: 34px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px 40px; border-radius: 12px; }
+  #drop .dropbox:hover { background: rgba(240,180,41,.05); }
+  #drop .doc { font-size: 40px; line-height: 1; }
+  #drop .cta { color: var(--gold); font-weight: 700; font-size: 15px; }
+  #drop .req { color: var(--muted); font-size: 11px; max-width: 420px; }
 
   /* Gantt */
   .gantt { position: relative; min-width: max-content; }
@@ -85,20 +94,26 @@
   .daycell { flex: 0 0 auto; border-right: 1px solid var(--border); text-align: center; font-size: 10px; color: var(--muted); padding: 4px 0; }
   .daycell.weekend { background: rgba(255,255,255,.03); }
   .daycell.today { color: var(--accent); font-weight: 700; }
+  .timeaxis .corner .pl { padding: 6px 8px; font-size: 10px; font-weight: 700; letter-spacing: .6px; color: var(--muted); }
   .lane { display: flex; border-bottom: 1px solid var(--border); position: relative; }
-  .lane .lanehdr { position: sticky; left: 0; z-index: 4; width: 120px; flex: 0 0 120px; background: var(--surface-2); border-right: 1px solid var(--border); padding: 6px 8px; font-size: 12px; }
-  .lane .lanehdr .cap { color: var(--muted); font-size: 10px; }
+  .lane .lanehdr { position: sticky; left: 0; z-index: 4; width: 120px; flex: 0 0 120px; background: var(--surface-2); border-right: 1px solid var(--border); padding: 8px 10px; font-size: 13px; font-weight: 600; display: flex; flex-direction: column; justify-content: center; }
+  .lane .lanehdr .line { font-size: 11px; color: var(--muted); font-weight: 500; }
+  .lane .lanehdr .cap { color: var(--muted); font-size: 10px; font-weight: 400; margin-top: 2px; }
+  .lane .lanehdr .sort { color: var(--muted); font-size: 11px; margin-top: 3px; opacity: .7; }
   .lane .track { position: relative; flex: 1 1 auto; }
   .grid { position: absolute; inset: 0; pointer-events: none; }
   .grid .gcol { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--border); }
   .grid .gcol.weekend { background: rgba(255,255,255,.03); }
   .todayline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 3; }
   .bar {
-    position: absolute; height: 30px; border-radius: 5px; color: #0a0a12; font-size: 11px;
-    padding: 0 6px; display: flex; align-items: center; overflow: hidden; white-space: nowrap;
-    cursor: grab; border: 1px solid rgba(0,0,0,.25); box-shadow: 0 1px 3px rgba(0,0,0,.4);
+    position: absolute; height: 58px; border-radius: 6px; color: #0a0a12; font-size: 10px;
+    padding: 4px 6px; display: flex; flex-direction: column; justify-content: center; gap: 1px;
+    overflow: hidden; white-space: nowrap;
+    cursor: grab; border: 1px solid rgba(0,0,0,.3); box-shadow: 0 1px 4px rgba(0,0,0,.45);
   }
-  .bar.selected { outline: 2px solid #fff; outline-offset: 1px; z-index: 4; }
+  .bar .b-id { font-weight: 700; font-size: 11px; }
+  .bar .b-sub { opacity: .85; }
+  .bar.selected { outline: 2px solid var(--gold); outline-offset: 1px; z-index: 4; }
   .bar.dragging { opacity: .5; }
   .bar.ripple-worse { animation: flashRed 1.2s ease-out; }
   .bar.ripple-better { animation: flashGreen 1.2s ease-out; }
@@ -111,7 +126,7 @@
   .secthead { position: sticky; left: 0; z-index: 4; display: flex; align-items: center; gap: 8px; background: #15152a; padding: 4px 10px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; cursor: pointer; }
   .secthead .chev { transition: transform .15s; }
   .secthead.collapsed .chev { transform: rotate(-90deg); }
-  .bar.wip { height: 24px; font-size: 10px; }
+  .bar.wip { height: 40px; font-size: 9px; }
 
   /* status colors */
   .c-gray-dark { background: var(--gray-dark); color: #fff; }
@@ -136,9 +151,8 @@
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
 
   /* Detail panel */
-  .side h3 { margin: 0 0 8px; font-size: 14px; }
-  .side .kv { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; font-size: 12px; margin-bottom: 10px; }
-  .side .kv .k { color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: 12px; margin-bottom: 12px; }
+  .kv .k { color: var(--muted); }
   .shorttbl { width: 100%; border-collapse: collapse; font-size: 11px; }
   .shorttbl th, .shorttbl td { padding: 3px 5px; border-top: 1px solid var(--border); text-align: left; }
   .shorttbl th { color: var(--muted); }
@@ -149,6 +163,7 @@
   .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
   .modal-bg.hidden { display: none; }
   .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; max-width: 720px; width: 90%; max-height: 80vh; overflow: auto; padding: 18px; }
+  #orderModal .modal { max-width: 900px; }
   .modal h2 { margin: 0 0 12px; font-size: 16px; }
   .modal .cols { display: flex; gap: 16px; }
   .modal .col { flex: 1 1 0; }
@@ -169,8 +184,11 @@
 <body>
 <header class="app">
   <div class="titlebar">
-    <h1>Factory Scheduler — Gantt</h1>
-    <span class="ver">v1.2.2</span>
+    <span style="font-size:18px">🏭</span>
+    <div>
+      <h1>Factory Scheduler</h1>
+      <div class="ver">SLOC-aware inventory &amp; lead times · <span style="color:var(--gold)">★ Line 71E priority</span> · Units-per-day M–F · Drag bars to reorder</div>
+    </div>
     <span id="cdnwarn" class="nofile" style="color:var(--red);display:none;">⚠ SheetJS CDN blocked — file parsing unavailable.</span>
     <div class="spacer"></div>
     <div class="toolbar">
@@ -194,13 +212,24 @@
 <div class="main">
   <div class="view" id="view">
     <div id="drop">
-      <h2>Drop your production workbook here</h2>
-      <div>or use <b>Load Workbook</b> above. Expected tabs: Orders, BOM, On Hand, Units Per Day, Shifts, Component Exclusions, SLOC Lead Times, Critical Components, Master Data.</div>
+      <div class="emoji">🏭</div>
+      <h2>Factory Scheduler</h2>
+      <div class="tag">Gantt chart view with SLOC-aware inventory &amp; lead times.</div>
+      <div class="tag"><span class="gold">★ Line 71E priority</span> on date ties · Units-per-day scheduling M–F</div>
+      <div class="tag gold">· All lines start from today.</div>
+      <div class="dropbox" id="dropbox">
+        <div class="doc">📄</div>
+        <div class="cta">Drop Excel file here or click to browse</div>
+        <div class="req">Required: Orders, Units Per Day, BOM, On Hand, SLOC Lead Times, Critical Components</div>
+      </div>
     </div>
     <div id="gantt" class="gantt" style="display:none;"></div>
     <div id="list" class="listview" style="display:none;"></div>
   </div>
-  <aside class="side hidden" id="side"></aside>
+</div>
+
+<div id="orderModal" class="modal-bg hidden">
+  <div class="modal" id="orderModalBody"></div>
 </div>
 
 <div id="validationModal" class="modal-bg hidden">
@@ -622,12 +651,10 @@ function recompute(){
 
 function render(){
   document.getElementById('drop').style.display = 'none';
-  document.getElementById('side').classList.toggle('hidden', !selectedOrderId);
   renderSummary();
   document.getElementById('gantt').style.display = listView ? 'none' : 'block';
   document.getElementById('list').style.display = listView ? 'block' : 'none';
   if (listView) renderListView(); else renderGantt();
-  if (selectedOrderId) renderDetail(selectedOrderId);
 }
 
 function visibleOrders(){
@@ -682,18 +709,18 @@ function renderGantt(){
   const trackW = days.length * dayWidth;
 
   // time axis
-  let html = `<div class="timeaxis"><div class="corner"></div>` +
+  let html = `<div class="timeaxis"><div class="corner"><div class="pl">PRODUCTION LINE</div></div>` +
     days.map(d => `<div class="daycell ${isWeekend(d)?'weekend':''} ${+startOfDay(d)===+TODAY?'today':''}" style="width:${dayWidth}px">${fmtDate(d)}</div>`).join('') +
     `</div>`;
 
   // WIP collapsible section
   html += `<div class="secthead ${wipExpanded?'':'collapsed'}" id="wiphead"><span class="chev">▾</span> WIP (${wip.length})</div>`;
   if (wipExpanded){
-    html += renderLanes(groupByLine(wip), days, trackW, true);
+    html += renderLanes(groupByMrp(wip), days, trackW, true);
   }
 
-  // main lanes grouped by line
-  html += renderLanes(groupByLine(main), days, trackW, false);
+  // main lanes grouped by MRP controller / line
+  html += renderLanes(groupByMrp(main), days, trackW, false);
   g.innerHTML = html;
 
   // grid + bars positioning is inline; wire events
@@ -702,36 +729,41 @@ function renderGantt(){
   setupGanttDrag(g, days);
 }
 
-function groupByLine(orders){
+function groupByMrp(orders){
+  // Group by MRP controller (e.g. 71A) so lanes read "71A (A-Line)".
   const m = new Map();
-  orders.forEach(o => { if (!m.has(o.line)) m.set(o.line, []); m.get(o.line).push(o); });
+  orders.forEach(o => { const k = o.mrp || o.line; if (!m.has(k)) m.set(k, []); m.get(k).push(o); });
   return m;
 }
 
 function renderLanes(grouped, days, trackW, isWip){
   const min = days[0];
+  const laneH = isWip ? 50 : 70;
   let html = '';
-  for (const [line, orders] of grouped){
+  for (const [mrp, orders] of grouped){
+    const line = orders[0] ? orders[0].line : mrp;
     const cap = orders[0] ? orders[0].unitsPerDay : '';
+    const label = (line && line !== mrp) ? `${esc(mrp)} <span class="line">(${esc(line)})</span>` : esc(mrp);
     const gridCols = days.map((d,i) => `<div class="gcol ${isWeekend(d)?'weekend':''}" style="left:${i*dayWidth}px;width:${dayWidth}px"></div>`).join('');
     const todayIdx = days.findIndex(d => +startOfDay(d) === +TODAY);
     const todayLine = todayIdx>=0 ? `<div class="todayline" style="left:${todayIdx*dayWidth}px"></div>` : '';
     const bars = orders.map(o => {
       const offset = workingDaysBetween(min, o.projStart);
       const left = offset * dayWidth;
-      const w = Math.max(dayWidth*0.6, (o.projDays||1) * dayWidth - 3);
+      const w = Math.max(dayWidth*0.7, (o.projDays||1) * dayWidth - 3);
       const dim = !matchesSearch(o) ? 'dim' : '';
       const sel = o.id === selectedOrderId ? 'selected' : '';
+      const sub = isWip ? `qty ${o.qty}` : `qty ${o.qty}<br>${fmtDate(o.projStart)}–${fmtDate(o.projFinish)}`;
       return `<div class="bar c-${o.status} ${isWip?'wip':''} ${dim} ${sel}" draggable="true" data-id="${esc(o.id)}"
-        style="left:${left}px;width:${w}px;top:${isWip?4:6}px">${esc(o.id)} · ${o.qty}</div>`;
+        style="left:${left}px;width:${w}px;top:6px"><span class="b-id">${esc(o.id)}</span><span class="b-sub">${sub}</span></div>`;
     }).join('');
     html += `<div class="lane ${isWip?'wipsection':''}">
-      <div class="lanehdr">${esc(line)}<div class="cap">${cap} /day</div></div>
-      <div class="track" style="width:${trackW}px;height:${isWip?34:44}px">
+      <div class="lanehdr">${label}<div class="cap">${cap} units/day · ${orders.length} orders</div><div class="sort">↕ drag to reorder</div></div>
+      <div class="track" style="width:${trackW}px;height:${laneH}px">
         <div class="grid">${gridCols}${todayLine}</div>${bars}
       </div></div>`;
   }
-  if (!grouped.size) html += `<div class="lane"><div class="lanehdr"> </div><div class="track" style="width:${trackW}px;height:30px"></div></div>`;
+  if (!grouped.size) html += `<div class="lane"><div class="lanehdr"> </div><div class="track" style="width:${trackW}px;height:40px"></div></div>`;
   return html;
 }
 
@@ -742,7 +774,7 @@ function setupBarEvents(bar){
   bar.addEventListener('mousemove', (e) => showTip(e, id));
   bar.addEventListener('mouseleave', hideTip);
 }
-function selectOrder(id){ selectedOrderId = id; render(); }
+function selectOrder(id){ selectedOrderId = id; render(); renderOrderModal(id); }
 
 let dragId = null;
 function setupGanttDrag(container, days){
@@ -795,34 +827,39 @@ function showTip(e, id){
 }
 function hideTip(){ document.getElementById('tip').style.display = 'none'; }
 
-/* ---------------- Detail panel ---------------- */
-function renderDetail(id){
+/* ---------------- Order detail modal ---------------- */
+function renderOrderModal(id){
   const o = displayOrders.find(x => x.id === id);
-  const side = document.getElementById('side');
-  if (!o){ side.classList.add('hidden'); return; }
-  side.classList.remove('hidden');
-  const shortRows = (o.components||[]).map(c => {
-    const tag = c.excluded ? `<span class="pill" style="background:var(--muted);color:#000">excl</span>`
-      : c.deficit>0 ? `<span class="pill" style="background:${c.critical?'var(--red)':'var(--yellow)'};color:#000">${c.critical?'critical':'short'}</span>`
+  if (!o) return;
+  const rows = (o.components||[]).map(c => {
+    const avail = (model.avail[c.component] || 0);
+    const lead = Math.max(0, ...((model.onHandDetail[c.component]||[{leadTime:0}]).map(d=>d.leadTime)));
+    const tag = c.excluded ? `<span class="pill" style="background:var(--muted);color:#000">excluded</span>`
+      : c.deficit>0 ? `<span class="pill" style="background:${c.critical?'var(--red)':'var(--yellow)'};color:#000">${c.critical?'critical':'short '+c.deficit}</span>`
       : `<span class="pill" style="background:var(--green);color:#000">ok</span>`;
     return `<tr><td><span class="comp-link" data-comp="${esc(c.component)}">${esc(c.component)}</span></td>
-      <td>${esc(c.desc||'')}</td><td>${c.need}</td><td>${c.deficit||0}</td><td>${esc(c.owner||'')}</td><td>${tag}</td></tr>`;
+      <td>${esc(c.desc||'')}</td><td style="text-align:right">${c.need}</td><td style="text-align:right">${avail}</td>
+      <td>${esc(c.procType||'')}</td><td>${esc(c.owner||'')}</td><td>${lead}d</td><td>${tag}</td></tr>`;
   }).join('');
-  side.innerHTML = `
-    <h3>${esc(o.id)} <span class="pill c-${o.status}">${STATUS_LABEL[o.status]}</span></h3>
-    <div class="kv">
+  const body = document.getElementById('orderModalBody');
+  body.innerHTML = `
+    <h2>${esc(o.id)} <span class="pill c-${o.status}">${STATUS_LABEL[o.status]}</span></h2>
+    <div class="kv" style="grid-template-columns:120px 1fr 120px 1fr">
       <div class="k">Material</div><div>${esc(o.material||'')}</div>
-      <div class="k">Line</div><div>${esc(o.line)} (${o.unitsPerDay}/day)</div>
+      <div class="k">Line</div><div>${esc(o.mrp)} (${esc(o.line)}) · ${o.unitsPerDay}/day</div>
       <div class="k">Quantity</div><div>${o.qty}</div>
       <div class="k">Mount scan</div><div>${o.scan?fmtDateY(o.scan):'—'}</div>
       <div class="k">Scheduled</div><div>${o.scheduled?fmtDateY(o.scheduled):'—'}</div>
+      <div class="k">Basic start/fin</div><div>${o.bscStart?fmtDateY(o.bscStart):'—'} / ${o.bscFin?fmtDateY(o.bscFin):'—'}</div>
       <div class="k">Proj. start</div><div>${fmtDateY(o.projStart)}</div>
       <div class="k">Proj. finish</div><div>${fmtDateY(o.projFinish)} (${o.projDays}d)</div>
     </div>
-    <h3 style="font-size:13px">Components</h3>
-    <table class="shorttbl"><tr><th>Comp</th><th>Desc</th><th>Need</th><th>Short</th><th>Owner</th><th></th></tr>${shortRows||'<tr><td colspan=6>No BOM</td></tr>'}</table>
-  `;
-  side.querySelectorAll('.comp-link').forEach(el => el.onclick = () => showCompModal(el.dataset.comp));
+    <h4 style="margin:6px 0">Inventory Log</h4>
+    <table class="shorttbl"><tr><th>Component</th><th>Description</th><th>Need</th><th>Avail</th><th>Proc</th><th>Owner</th><th>Lead</th><th>Status</th></tr>
+      ${rows||'<tr><td colspan=8>No BOM</td></tr>'}</table>
+    <div class="actions"><button onclick="document.getElementById('orderModal').classList.add('hidden')">Close</button></div>`;
+  body.querySelectorAll('.comp-link').forEach(el => el.onclick = () => showCompModal(el.dataset.comp));
+  document.getElementById('orderModal').classList.remove('hidden');
 }
 
 /* ---------------- Component modal ---------------- */
@@ -962,7 +999,9 @@ function setZoom(delta){ dayWidth = Math.max(30, Math.min(200, dayWidth + delta)
 
 window.addEventListener('DOMContentLoaded', () => {
   if (typeof XLSX === 'undefined') document.getElementById('cdnwarn').style.display = 'inline';
-  document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  const fileInput = document.getElementById('fileInput');
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+  document.getElementById('dropbox').addEventListener('click', () => fileInput.click());
   const drop = document.getElementById('drop'), view = document.getElementById('view');
   ['dragenter','dragover'].forEach(ev => view.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('dragover'); }));
   ['dragleave','drop'].forEach(ev => view.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('dragover'); }));
@@ -979,6 +1018,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('vCancel').onclick = closeValidation;
   document.getElementById('vProceed').onclick = () => { if (pendingProceed) pendingProceed(); };
   document.getElementById('compModal').addEventListener('click', e => { if (e.target.id==='compModal') e.target.classList.add('hidden'); });
+  document.getElementById('orderModal').addEventListener('click', e => { if (e.target.id==='orderModal') e.target.classList.add('hidden'); });
 
   // test hook
   window.__app = { loadArrayBuffer, get model(){return model;}, get displayOrders(){return displayOrders;}, exportExcel, buildExportWorkbook, recompute, selectOrder, reorder };
