@@ -1,0 +1,19 @@
+{
+  "name": "componentapp",
+  "version": "1.0.0",
+  "description": "Factory Scheduler — Gantt: a single-file HTML production scheduling visualizer.",
+  "private": true,
+  "scripts": {
+    "gen": "node tools/gen-sample.mjs",
+    "test": "node tools/gen-sample.mjs && node tools/test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:38509/git/danielryan0420/ComponentApp"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "puppeteer": "^25.1.0",
+    "xlsx": "^0.18.5"
+  }
+}
